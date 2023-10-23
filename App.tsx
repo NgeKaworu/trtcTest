@@ -1,118 +1,197 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
-
-import React from 'react';
-import type {PropsWithChildren} from 'react';
+import React, {useState} from 'react';
 import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
   StyleSheet,
-  Text,
-  useColorScheme,
+  Button,
+  Platform,
+  PermissionsAndroid,
+  SafeAreaView,
+  TextInput,
   View,
+  Alert,
 } from 'react-native';
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+import TRTCCloud, {
+  TRTCCloudDef,
+  TRTCCloudListener,
+  TRTCParams,
+  TXVideoView,
+} from 'trtc-react-native';
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
+const SDKAPPID = "";
 
-function Section({children, title}: SectionProps): JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+export default function App() {
+  const [meetId, setMeetId] = React.useState('6868');
+  const [userId, setUserId] = React.useState('');
+  const [isEnter, setIsEnter] = useState(false);
+  const [remoteUserId, setRemoteUserId] = useState(null);
+  const [remoteVideo, setRemoteVideo] = useState(false);
+  const [remoteSub, setRemoteSub] = useState(false);
+  React.useEffect(() => {
+    initInfo();
+    return () => {
+      console.log('destroy');
+      const trtcCloud = TRTCCloud.sharedInstance();
+      trtcCloud.unRegisterListener(onRtcListener);
+    };
+  }, []);
+
+  async function initInfo() {
+    if (Platform.OS === 'android') {
+      await PermissionsAndroid.requestMultiple([
+        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+        PermissionsAndroid.PERMISSIONS.CAMERA,
+      ]);
+    }
+    const trtcCloud = TRTCCloud.sharedInstance();
+    trtcCloud.registerListener(onRtcListener);
+  }
+
+  function onRtcListener(type: TRTCCloudListener, params: any) {
+    if (type === TRTCCloudListener.onEnterRoom) {
+      console.log('==onEnterRoom');
+      if (params.result > 0) {
+        setIsEnter(true);
+      }
+    }
+    if (type === TRTCCloudListener.onExitRoom) {
+      setIsEnter(false);
+      setRemoteUserId(null);
+    }
+    if (type === TRTCCloudListener.onRemoteUserEnterRoom) {
+      setRemoteUserId(params.userId);
+    }
+    if (type === TRTCCloudListener.onRemoteUserLeaveRoom) {
+      setRemoteUserId(null);
+    }
+    if (type === TRTCCloudListener.onUserVideoAvailable) {
+      setRemoteVideo(params.available);
+    }
+    if (type === TRTCCloudListener.onUserSubStreamAvailable) {
+      setRemoteSub(params.available);
+    }
+    if (
+      type !== TRTCCloudListener.onNetworkQuality &&
+      type !== TRTCCloudListener.onStatistics
+    ) {
+      console.log(type, params);
+    }
+  }
+
   return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
-}
-
-function App(): JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
-
-  return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
+    <SafeAreaView style={styles.container}>
+      <View style={{padding: 20}}>
+        <TextInput
+          style={{height: 40, borderColor: 'gray', borderWidth: 1}}
+          onChangeText={text => setMeetId(text)}
+          value={meetId}
+          placeholder="Please enter room ID"
+        />
+        <TextInput
           style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
+            height: 40,
+            borderColor: 'gray',
+            borderWidth: 1,
+            marginTop: 10,
+            marginBottom: 10,
+          }}
+          onChangeText={text => setUserId(text)}
+          value={userId}
+          placeholder="Please enter user ID"
+        />
+        <View style={styles.fixToText}>
+          <Button
+            title="Enter Room"
+            onPress={async () => {
+              if (!SDKAPPID) {
+                Alert.alert('Please configure sdkappId information');
+                return;
+              }
+              if (!meetId || !userId) {
+                Alert.alert('Please enter room ID and user ID');
+                return;
+              }
+
+              const userSig = (
+                await (
+                  await fetch(
+                    `your_host?sdkAppId=${SDKAPPID}&userId=${userId}`,
+                  )
+                )?.json()
+              )?.userSig;
+
+              console.log('userSig', userSig);
+
+              const params = new TRTCParams({
+                sdkAppId: SDKAPPID,
+                userId,
+                userSig,
+                roomId: Number(meetId),
+              });
+              const trtcCloud = TRTCCloud.sharedInstance();
+              trtcCloud.enterRoom(
+                params,
+                TRTCCloudDef.TRTC_APP_SCENE_VIDEOCALL,
+              );
+              trtcCloud.startLocalAudio(TRTCCloudDef.TRTC_AUDIO_QUALITY_SPEECH);
+            }}
+          />
+          <Button
+            title="Exit Room"
+            onPress={() => {
+              const trtcCloud = TRTCCloud.sharedInstance();
+              trtcCloud.exitRoom();
+            }}
+          />
         </View>
-      </ScrollView>
+      </View>
+      {isEnter && (
+        <TXVideoView.LocalView
+          style={styles.video}
+          renderParams={{
+            rotation: TRTCCloudDef.TRTC_VIDEO_ROTATION_0,
+          }}
+        />
+      )}
+      {remoteUserId && remoteVideo && (
+        <TXVideoView.RemoteView
+          userId={remoteUserId}
+          viewType={TRTCCloudDef.TRTC_VideoView_SurfaceView}
+          streamType={TRTCCloudDef.TRTC_VIDEO_STREAM_TYPE_BIG}
+          renderParams={{
+            rotation: TRTCCloudDef.TRTC_VIDEO_ROTATION_0,
+          }}
+          style={styles.video}
+        />
+      )}
+      {remoteUserId && remoteSub && (
+        <TXVideoView.RemoteView
+          userId={remoteUserId}
+          viewType={TRTCCloudDef.TRTC_VideoView_SurfaceView}
+          streamType={TRTCCloudDef.TRTC_VIDEO_STREAM_TYPE_SUB}
+          style={styles.video}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
+  container: {
+    flex: 1,
   },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
+  fixToText: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
+  scrollView: {
+    backgroundColor: 'white',
+    marginHorizontal: 20,
   },
-  highlight: {
-    fontWeight: '700',
+  text: {
+    fontSize: 42,
+  },
+  video: {
+    width: 240,
+    height: 180,
   },
 });
-
-export default App;
